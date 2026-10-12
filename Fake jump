@@ -1,0 +1,194 @@
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Remove previous GUI
+local oldGui = playerGui:FindFirstChild("FakeJumpGui")
+if oldGui then
+    oldGui:Destroy()
+end
+
+-- Create GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "FakeJumpGui"
+gui.ResetOnSpawn = false
+gui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Name = "Main"
+frame.Size = UDim2.fromOffset(240, 150)
+frame.Position = UDim2.new(0.5, -120, 0.5, -75)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 38)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 14)
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(110, 90, 255)
+stroke.Thickness = 2
+stroke.Parent = frame
+
+-- Title / drag handle
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 50)
+title.BackgroundTransparency = 1
+title.Text = " FAKE JUMP"
+title.TextColor3 = Color3.fromRGB(190, 175, 255)
+title.TextSize = 21
+title.Font = Enum.Font.GothamBold
+title.Active = true
+title.Parent = frame
+
+-- Dragging on PC and mobile
+local dragging = false
+local dragStart
+local startPos
+local dragInput
+
+title.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+    end
+end)
+
+title.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (
+        input.UserInputType == Enum.UserInputType.MouseMovement
+        or input == dragInput
+    ) then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- Fake Jump button
+local button = Instance.new("TextButton")
+button.Name = "FakeJumpButton"
+button.Size = UDim2.new(1, -30, 0, 55)
+button.Position = UDim2.new(0, 15, 0, 75)
+button.BackgroundColor3 = Color3.fromRGB(105, 75, 255)
+button.Text = "FAKE JUMP"
+button.TextColor3 = Color3.new(1, 1, 1)
+button.TextSize = 18
+button.Font = Enum.Font.GothamBold
+button.AutoButtonColor = true
+button.Parent = frame
+
+Instance.new("UICorner", button).CornerRadius = UDim.new(0, 10)
+
+local jumping = false
+
+button.Activated:Connect(function()
+    if jumping then return end
+
+    local character = player.Character
+    local humanoid = character
+        and character:FindFirstChildOfClass("Humanoid")
+    local root = character
+        and character:FindFirstChild("HumanoidRootPart")
+    local animator = humanoid
+        and humanoid:FindFirstChildOfClass("Animator")
+
+    if not humanoid or not root or not animator
+        or humanoid.Health <= 0 then
+        return
+    end
+
+    jumping = true
+
+    -- Play configured R15 jump animation
+    local animate = character:FindFirstChild("Animate")
+    local jumpFolder = animate and animate:FindFirstChild("jump")
+    local jumpAnimation = jumpFolder
+        and jumpFolder:FindFirstChildWhichIsA("Animation")
+
+    if jumpAnimation then
+        local success, track = pcall(function()
+            return animator:LoadAnimation(jumpAnimation)
+        end)
+
+        if success and track then
+            track.Priority = Enum.AnimationPriority.Action
+            track:Play(0.1)
+
+            task.delay(0.6, function()
+                if track.IsPlaying then
+                    track:Stop(0.15)
+                end
+            end)
+        end
+    end
+
+    -- Launch upward, preserving horizontal movement
+    root.AssemblyLinearVelocity = Vector3.new(
+        root.AssemblyLinearVelocity.X,
+        50,
+        root.AssemblyLinearVelocity.Z
+    )
+
+    -- Wait for landing, including a timeout for safety
+    local landedConnection
+    local finished = false
+
+    local function finishJump()
+        if finished then return end
+        finished = true
+        jumping = false
+
+        if landedConnection then
+            landedConnection:Disconnect()
+            landedConnection = nil
+        end
+
+        -- Stop leftover action animations
+        if animator.Parent then
+            for _, track in ipairs(
+                animator:GetPlayingAnimationTracks()
+            ) do
+                if track.Priority == Enum.AnimationPriority.Action then
+                    track:Stop(0.15)
+                end
+            end
+        end
+
+        -- Let the standard Animate script restore the idle pose
+        if humanoid.Parent and humanoid.Health > 0 then
+            humanoid:ChangeState(Enum.HumanoidStateType.Running)
+        end
+    end
+
+    landedConnection = humanoid.StateChanged:Connect(
+        function(_, newState)
+            if newState == Enum.HumanoidStateType.Landed
+                or newState == Enum.HumanoidStateType.Running then
+                finishJump()
+            end
+        end
+    )
+
+    task.delay(8, finishJump)
+end)
